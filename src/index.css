@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: 'Cormorant Garamond', Georgia, Cambria, serif;
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  
+  /* Logo Dominant Colors: Terracotta Rust / Sacred Ochre */
+  --color-terracotta-900: #7A3411;
+  --color-terracotta-800: #964218;
+  --color-terracotta-700: #B85D28;
+  --color-terracotta-600: #CD6D34;
+  --color-terracotta-500: #DF8046;
+  --color-terracotta-100: #FAEBE1;
+  --color-terracotta-50: #FDF7F2;
+
+  /* Sophisticated Forest & Pine Greens */
+  --color-pine-950: #0A2218;
+  --color-pine-900: #0F2E22;
+  --color-pine-800: #153C2D;
+  --color-pine-700: #1E503D;
+  --color-pine-600: #296850;
+  --color-pine-100: #E4ECE7;
+  --color-pine-50: #F1F6F3;
+
+  /* Mountain Sage Greens */
+  --color-sage-600: #587967;
+  --color-sage-500: #6B9080;
+  --color-sage-400: #88AB9C;
+  --color-sage-100: #E6EFE9;
+  --color-sage-50: #F2F7F4;
+
+  /* Warm Himalayan Sandstone Neutrals */
+  --color-warm-bg: #FBF9F5;
+  --color-warm-surface: #F5EFEB;
+  --color-warm-card: #FFFFFF;
+  --color-earth-dark: #1C1917;
+  --color-earth-muted: #645E59;
+  --color-earth-border: #E8E2D9;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-warm-bg);
+  color: var(--color-earth-dark);
+}
+
+h1, h2, h3, .font-serif {
+  font-family: var(--font-serif);
+}
+
+/* Custom scrollbar with terracotta hover accent */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F4EFEA;
+}
+::-webkit-scrollbar-thumb {
+  background: #C8BEB3;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #B85D28;
+}
+

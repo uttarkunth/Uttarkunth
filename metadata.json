@@ -1,0 +1,8 @@
+{
+  "name": "Uttarkunth – Himalayan Entrepreneurial Ecosystem",
+  "description": "Ideas born in the Himalayas. Built through people. An entrepreneurial ecosystem exploring how sustainable businesses, creativity, learning, and collective action contribute to meaningful community development.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
