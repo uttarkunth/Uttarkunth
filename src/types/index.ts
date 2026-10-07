@@ -1,5 +1,9 @@
 export type PageId =
   | 'home'
+  | 'stays'
+  | 'host-portal'
+  | 'my-trips'
+  | 'admin-portal'
   | 'story'
   | 'philosophy'
   | 'ecosystem'

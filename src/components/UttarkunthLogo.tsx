@@ -66,7 +66,7 @@ export const UttarkunthLogo: React.FC<UttarkunthLogoProps> = ({
   // 2. Horizontal: Exact emblem image + typography
   if (variant === 'horizontal') {
     return (
-      <div className={`inline-flex items-center gap-3 ${className}`}>
+      <div className={`inline-flex items-center gap-2 sm:gap-3 ${className}`}>
         <img
           src={emblemImg}
           alt="Uttarkunth Official Emblem"
@@ -82,7 +82,7 @@ export const UttarkunthLogo: React.FC<UttarkunthLogoProps> = ({
           </span>
           {showSubtitle && (
             <span
-              className={`font-sans uppercase font-medium mt-1 ${subtitleSizes[size]}`}
+              className={`font-sans uppercase font-medium mt-0.5 sm:mt-1 hidden sm:block ${subtitleSizes[size]}`}
               style={{ color: subtitleColor }}
             >
               Blessings from Tapobhoomi

@@ -14,6 +14,10 @@ import { FounderView } from './views/FounderView';
 import { JoinView } from './views/JoinView';
 import { ContactView } from './views/ContactView';
 import { NotFoundView } from './views/NotFoundView';
+import { StaysView } from './views/StaysView';
+import { HostOnboardingView } from './views/HostOnboardingView';
+import { GuestTripsView } from './views/GuestTripsView';
+import { AdminDashboardView } from './views/AdminDashboardView';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<PageId>('home');
@@ -24,6 +28,10 @@ export default function App() {
       const hash = window.location.hash.replace('#', '') as PageId;
       const validPages: PageId[] = [
         'home',
+        'stays',
+        'host-portal',
+        'my-trips',
+        'admin-portal',
         'story',
         'philosophy',
         'ecosystem',
@@ -50,7 +58,11 @@ export default function App() {
   // Update document title dynamically based on active page
   useEffect(() => {
     const pageTitles: Record<PageId, string> = {
-      home: 'Uttarkunth – Ideas Born in the Himalayas. Built Through People.',
+      home: 'Uttarkunth – Himalayan Entrepreneurial Ecosystem',
+      stays: 'Uttarkunth Stays – Himalayan Homestays & Eco Lodges',
+      'host-portal': 'Host Portal – List Your Property (0% Year 1) | Uttarkunth Stays',
+      'my-trips': 'My Trips & Bookings | Uttarkunth Stays',
+      'admin-portal': 'Platform Administration & Verification | Uttarkunth',
       story: 'Our Story – The Genesis & Founding Question | Uttarkunth',
       philosophy: 'Our Philosophy – Learn by Doing. Grow by Serving | Uttarkunth',
       ecosystem: 'Our Ecosystem – Parent Brand Architecture | Uttarkunth',
@@ -78,6 +90,19 @@ export default function App() {
     switch (currentPage) {
       case 'home':
         return <HomeView onNavigate={navigateTo} />;
+      case 'stays':
+        return (
+          <StaysView
+            onNavigateToHost={() => navigateTo('host-portal')}
+            onNavigateToTrips={() => navigateTo('my-trips')}
+          />
+        );
+      case 'host-portal':
+        return <HostOnboardingView onNavigateToStays={() => navigateTo('stays')} />;
+      case 'my-trips':
+        return <GuestTripsView onNavigateToExplore={() => navigateTo('stays')} />;
+      case 'admin-portal':
+        return <AdminDashboardView />;
       case 'story':
         return <StoryView onNavigate={navigateTo} />;
       case 'philosophy':

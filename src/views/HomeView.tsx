@@ -258,6 +258,83 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
         </div>
       </section>
 
+      {/* SECTION 5.5: UTTARKUNTH STAYS (Section 51 Specification) */}
+      <section className="py-20 sm:py-28 bg-[#163E2E] text-white border-b border-[#214738]">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16">
+          <div className="text-center space-y-4 max-w-3xl mx-auto">
+            <span className="text-xs uppercase tracking-widest text-[#D8773E] font-semibold border-b border-[#D8773E]/40 pb-1">
+              Accommodation Marketplace
+            </span>
+            <h2 className="text-3xl sm:text-5xl font-serif font-bold text-white tracking-tight">
+              UTTARKUNTH STAYS
+            </h2>
+            <p className="text-xl sm:text-2xl font-serif italic text-[#D1E0D7]">
+              Stay Somewhere Meaningful.
+            </p>
+            <p className="text-sm sm:text-base text-[#C5D7CE] font-light leading-relaxed">
+              Discover homestays, hotels, resorts, villas and unique stays while connecting with the people who host them.
+            </p>
+            <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-4">
+              <button
+                onClick={() => onNavigate('stays')}
+                className="w-full sm:w-auto px-8 py-3.5 bg-[#B85D28] hover:bg-[#964218] text-white text-xs font-semibold uppercase tracking-widest transition-all shadow-md flex items-center justify-center gap-2"
+              >
+                <span>Explore Stays</span>
+                <ArrowRight size={14} />
+              </button>
+              <button
+                onClick={() => onNavigate('host-portal')}
+                className="w-full sm:w-auto px-8 py-3.5 bg-transparent hover:bg-white/10 text-white text-xs font-semibold uppercase tracking-widest transition-all border border-white/40 flex items-center justify-center gap-2"
+              >
+                <span>List Your Property</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Why Host With Uttarkunth? */}
+          <div className="pt-8 border-t border-[#214738] space-y-8">
+            <div className="text-center">
+              <h3 className="text-2xl font-serif font-bold text-white">Why Host With Uttarkunth?</h3>
+              <p className="text-xs text-[#A8C2B4] mt-1">Built for mountain property owners with transparent community terms.</p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="bg-[#0F2E22] p-6 rounded-xl border border-white/10 space-y-3">
+                <span className="text-xs font-bold text-[#D8773E] uppercase tracking-wider block">0% Introductory</span>
+                <h4 className="text-lg font-serif font-bold text-white">0% Platform Commission for Your First 12 Months</h4>
+                <p className="text-xs text-[#C5D7CE] font-light leading-relaxed">
+                  Give your property room to grow without Uttarkunth platform commission during your introductory period.
+                </p>
+              </div>
+
+              <div className="bg-[#0F2E22] p-6 rounded-xl border border-white/10 space-y-3">
+                <span className="text-xs font-bold text-[#A8C2B4] uppercase tracking-wider block">Transparent Rate</span>
+                <h4 className="text-lg font-serif font-bold text-white">10% Standard Platform Commission Afterward</h4>
+                <p className="text-xs text-[#C5D7CE] font-light leading-relaxed">
+                  A simple and transparent platform commission with zero hidden deductions or surprise charges.
+                </p>
+              </div>
+
+              <div className="bg-[#0F2E22] p-6 rounded-xl border border-white/10 space-y-3">
+                <span className="text-xs font-bold text-[#A8C2B4] uppercase tracking-wider block">Mobile-First</span>
+                <h4 className="text-lg font-serif font-bold text-white">Professional Booking Management</h4>
+                <p className="text-xs text-[#C5D7CE] font-light leading-relaxed">
+                  Manage availability, rooms, reservations and guests seamlessly from your phone.
+                </p>
+              </div>
+
+              <div className="bg-[#0F2E22] p-6 rounded-xl border border-white/10 space-y-3">
+                <span className="text-xs font-bold text-[#A8C2B4] uppercase tracking-wider block">Ecosystem</span>
+                <h4 className="text-lg font-serif font-bold text-white">Growing Community</h4>
+                <p className="text-xs text-[#C5D7CE] font-light leading-relaxed">
+                  Become part of a growing network of meaningful places and conscious mountain travellers.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* SECTION 6: THE CURRENT VENTURES */}
       <section className="py-20 sm:py-28 bg-[#FBF9F5] border-b border-[#E8E2D9]">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-14">

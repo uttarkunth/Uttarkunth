@@ -13,6 +13,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate }) => {
 
   const navLinks: { id: PageId; label: string }[] = [
     { id: 'home', label: 'Home' },
+    { id: 'stays', label: 'Uttarkunth Stays' },
     { id: 'story', label: 'Our Story' },
     { id: 'philosophy', label: 'Philosophy' },
     { id: 'ecosystem', label: 'Ecosystem' },
@@ -21,7 +22,10 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate }) => {
     { id: 'media', label: 'Stories & Media' },
     { id: 'vision', label: 'Future Vision' },
     { id: 'founder', label: 'Founder' },
+    { id: 'host-portal', label: 'Host Portal (0%)' },
+    { id: 'my-trips', label: 'My Trips' },
     { id: 'contact', label: 'Contact' },
+    { id: 'admin-portal', label: 'Admin Console' },
   ];
 
   const handleNav = (id: PageId) => {
@@ -37,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate }) => {
         {/* Zone 1: Official Logo Emblem & Wordmark */}
         <button
           onClick={() => handleNav('home')}
-          className="text-left flex items-center hover:opacity-90 transition-opacity focus:outline-none py-1"
+          className="text-left flex items-center hover:opacity-90 transition-opacity focus:outline-none py-1 shrink-0"
           aria-label="Uttarkunth Home"
         >
           <UttarkunthLogo variant="horizontal" size="sm" theme="light" />
@@ -86,26 +90,27 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate }) => {
           </div>
         </nav>
 
-        {/* Zone 3: 1-2 primary actions */}
-        <div className="flex items-center gap-3">
+        {/* Zone 3: 1-2 primary actions (Responsive spacing, zero collision) */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <button
             onClick={() => handleNav('join')}
-            className={`px-5 py-2.5 text-xs font-semibold tracking-wider uppercase transition-all duration-200 whitespace-nowrap rounded-none shadow-sm ${
+            className={`px-3 sm:px-5 py-2 sm:py-2.5 text-xs font-semibold tracking-wider uppercase transition-all duration-200 whitespace-nowrap rounded-none shadow-sm ${
               currentPage === 'join'
                 ? 'bg-[#964218] text-white border border-[#7A3411]'
                 : 'bg-[#B85D28] text-white hover:bg-[#964218] border border-[#B85D28]'
             }`}
           >
-            Join the Journey
+            <span className="hidden sm:inline">Join the Journey</span>
+            <span className="sm:hidden">Join</span>
           </button>
 
           {/* Mobile hamburger button */}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="lg:hidden p-2 text-[#163E2E] hover:bg-[#E8E2D9]/40 rounded-md focus:outline-none"
+            className="lg:hidden p-1.5 sm:p-2 text-[#163E2E] hover:bg-[#E8E2D9]/40 rounded-md focus:outline-none shrink-0"
             aria-label="Toggle Navigation Menu"
           >
-            {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+            {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
           </button>
         </div>
       </div>
