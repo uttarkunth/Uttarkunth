@@ -9,7 +9,7 @@ function response(statusCode, payload) {
   return { statusCode, headers, body: JSON.stringify(payload) };
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   if (event.httpMethod !== "GET") return response(405, { ok: false, error: "Method not allowed." });
 
   const baseUrl = process.env.SUPABASE_URL;
