@@ -75,7 +75,8 @@ test('Netlify handlers load as ES modules under this repository package configur
   assert.match(publicApi, /export const handler = async/);
   assert.match(guestApi, /export const handler = async/);
   assert.match(hostApi, /export const handler = async/);
-  assert.doesNotMatch(publicApi + guestApi + hostApi, /exports\\.handler|require\\(["']crypto["']\\)/);
+  assert.ok(!(publicApi + guestApi + hostApi).includes('exports.handler'));
+  assert.ok(!(publicApi + guestApi + hostApi).includes("require('crypto')"));
 });
 
 test('guest tracking credentials are sent in POST body, not URL query parameters', () => {
