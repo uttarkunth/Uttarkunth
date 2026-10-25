@@ -7,7 +7,7 @@ const headers = {
 function response(statusCode, payload) { return { statusCode, headers, body: JSON.stringify(payload) }; }
 function clean(value, max = 1000) { return String(value || "").trim().slice(0, max); }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   if (!["GET", "POST"].includes(event.httpMethod)) return response(405, { ok: false, error: "Method not allowed." });
   const baseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
