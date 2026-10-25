@@ -54,6 +54,23 @@ exports.handler = async (event) => {
   try {
     if (event.httpMethod === "GET") {
       const q = event.queryStringParameters || {};
+      if (q.availability === "1") {
+        const roomId = safeText(q.room_unit_id, 80);
+        const checkIn = safeText(q.check_in, 10), checkOut = safeText(q.check_out, 10);
+        const nights = nightsBetween(checkIn, checkOut);
+        if (!roomId || !validDate(checkIn) || !validDate(checkOut) || nights < 1) {
+          return response(400, { ok: false, error: "Provide a room and valid check-in/check-out dates." });
+        }
+        const roomRows = await rows("/rest/v1/room_units?select=id,property_id,room_name,max_guests,base_price,active&id=eq." + encodeURIComponent(roomId) + "&active=eq.true&limit=1");
+        if (!roomRows.length) return response(404, { ok: false, error: "Room not found or inactive." });
+        const room = roomRows[0];
+        const propertyRows = await rows("/rest/v1/properties?select=id&published=eq.true&moderation_status=eq.approved&id=eq." + encodeURIComponent(room.property_id) + "&limit=1");
+        if (!propertyRows.length) return response(404, { ok: false, error: "Property is not currently bookable." });
+        const blocks = await rows("/rest/v1/room_availability_blocks?select=id&room_unit_id=eq." + encodeURIComponent(room.id) + "&blocked_from=lt." + encodeURIComponent(checkOut) + "&blocked_until=gt." + encodeURIComponent(checkIn) + "&limit=1");
+        const bookings = await rows("/rest/v1/stay_bookings?select=id&room_unit_id=eq." + encodeURIComponent(room.id) + "&status=in.(pending,confirmed)&check_in=lt." + encodeURIComponent(checkOut) + "&check_out=gt." + encodeURIComponent(checkIn) + "&limit=1");
+        return response(200, { ok: true, available: !blocks.length && !bookings.length, nights, estimated_total: Number(room.base_price) * nights, message: blocks.length || bookings.length ? "Dates are not currently available." : "Dates look available; the host must confirm your request." });
+      }
+
       const ref = safeText(q.reference, 40).toUpperCase();
       const token = safeText(q.token, 200);
       if (!/^UK-[A-Z0-9-]{10,36}$/.test(ref) || token.length < 32) {
