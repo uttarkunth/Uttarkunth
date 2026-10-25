@@ -49,9 +49,11 @@ exports.handler = async (event) => {
   }
   async function enforceCreateRateLimit(event) {
     // Trust the platform-provided client IP first; hash it with a server secret before storage.
-    const forwarded = event.headers?.["x-nf-client-connection-ip"] ||
-      event.headers?.["X-Nf-Client-Connection-Ip"] ||
-      event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim();
+    const requestHeaders = event.headers || {};
+    const header = (name) => Object.entries(requestHeaders)
+      .find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+    const forwarded = header("x-nf-client-connection-ip") ||
+      header("x-forwarded-for")?.split(",")[0]?.trim();
     if (!forwarded) return false; // Fail closed rather than share an "unknown" global bucket.
     const ipHash = crypto.createHmac("sha256", serviceKey).update(String(forwarded)).digest("hex");
     const limiter = await db("/rest/v1/rpc/try_consume_booking_rate_limit", {
