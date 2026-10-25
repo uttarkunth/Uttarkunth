@@ -1,4 +1,4 @@
-const crypto = require("crypto");
+import crypto from 'node:crypto';
 
 const headers = {
   "Content-Type": "application/json; charset=utf-8",
@@ -25,7 +25,7 @@ function safeText(value, max) {
   return String(value || "").trim().slice(0, max);
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   if (!["GET", "POST", "PATCH"].includes(event.httpMethod)) {
     return response(405, { ok: false, error: "Method not allowed." });
   }
