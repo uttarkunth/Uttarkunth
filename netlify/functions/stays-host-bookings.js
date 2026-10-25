@@ -12,7 +12,8 @@ export const handler = async (event) => {
   const baseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!baseUrl || !serviceKey) return response(503, { ok: false, error: "Host portal is temporarily unavailable." });
-  const authHeader = event.headers?.authorization || event.headers?.Authorization || "";
+  const authHeader = Object.entries(event.headers || {})
+    .find(([key]) => key.toLowerCase() === "authorization")?.[1] || "";
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!match) return response(401, { ok: false, error: "Please sign in to access the host portal." });
   const token = match[1];
