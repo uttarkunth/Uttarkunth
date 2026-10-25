@@ -77,3 +77,11 @@ test('Netlify handlers load as ES modules under this repository package configur
   assert.match(hostApi, /export const handler = async/);
   assert.doesNotMatch(publicApi + guestApi + hostApi, /exports\\.handler|require\\(["']crypto["']\\)/);
 });
+
+test('guest tracking credentials are sent in POST body, not URL query parameters', () => {
+  const client = read('src/lib/staysApi.ts');
+  assert.match(client, /body: JSON\.stringify\(\{ action: 'track', reference, token \}\)/);
+  assert.doesNotMatch(client, /stays-bookings\?reference=.*token=/);
+  assert.match(guestApi, /event\.httpMethod === "POST" && body\.action === "track"/);
+  assert.match(guestApi, /Use the secure tracking form/);
+});
