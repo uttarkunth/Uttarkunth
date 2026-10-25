@@ -39,7 +39,8 @@ test('guest tracking token is cryptographically generated and stored only as a h
 test('booking request rate limit is performed atomically server-side', () => {
   assert.match(guestApi, /createHmac\("sha256", serviceKey\)/);
   assert.match(guestApi, /\/rest\/v1\/rpc\/try_consume_booking_rate_limit/);
-  assert.match(guestApi, /p_max_requests:\s*8/);
+  assert.match(guestApi, /p_max_requests: maxRequests/);
+  assert.match(guestApi, /const maxRequests = tracking \? 30 : event\.httpMethod === \"PATCH\" \? 12 : 8/);
   assert.doesNotMatch(guestApi, /\/rest\/v1\/booking_rate_limits\?select=id/);
 });
 
