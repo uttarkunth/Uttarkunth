@@ -1,4 +1,7 @@
 import test from 'node:test';
+import { handler as publicPropertiesHandler } from '../netlify/functions/stays-properties.js';
+import { handler as guestBookingsHandler } from '../netlify/functions/stays-bookings.js';
+import { handler as hostBookingsHandler } from '../netlify/functions/stays-host-bookings.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -63,4 +66,14 @@ test('server functions do not enable wildcard CORS', () => {
   for (const file of serverFiles) {
     assert.doesNotMatch(read(file), /Access-Control-Allow-Origin["']?\s*:\s*["']\*["']/i, file);
   }
+});
+
+test('Netlify handlers load as ES modules under this repository package configuration', () => {
+  assert.equal(typeof publicPropertiesHandler, 'function');
+  assert.equal(typeof guestBookingsHandler, 'function');
+  assert.equal(typeof hostBookingsHandler, 'function');
+  assert.match(publicApi, /export const handler = async/);
+  assert.match(guestApi, /export const handler = async/);
+  assert.match(hostApi, /export const handler = async/);
+  assert.doesNotMatch(publicApi + guestApi + hostApi, /exports\\.handler|require\\(["']crypto["']\\)/);
 });
