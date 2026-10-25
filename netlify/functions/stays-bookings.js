@@ -48,19 +48,22 @@ exports.handler = async (event) => {
     return r.json();
   }
   async function enforceCreateRateLimit(event) {
+    // Trust the platform-provided client IP first; hash it with a server secret before storage.
     const forwarded = event.headers?.["x-nf-client-connection-ip"] ||
       event.headers?.["X-Nf-Client-Connection-Ip"] ||
-      event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() || "unknown";
+      event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim();
+    if (!forwarded) return false; // Fail closed rather than share an "unknown" global bucket.
     const ipHash = crypto.createHmac("sha256", serviceKey).update(String(forwarded)).digest("hex");
-    const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    const recent = await rows("/rest/v1/booking_rate_limits?select=id&ip_hash=eq." + ipHash + "&created_at=gte." + encodeURIComponent(since) + "&limit=8");
-    if (recent.length >= 8) return false;
-    const saved = await db("/rest/v1/booking_rate_limits", {
-      method: "POST", headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ ip_hash: ipHash }),
+    const limiter = await db("/rest/v1/rpc/try_consume_booking_rate_limit", {
+      method: "POST",
+      body: JSON.stringify({
+        p_ip_hash: ipHash,
+        p_max_requests: 8,
+        p_window_seconds: 3600,
+      }),
     });
-    if (!saved.ok) throw new Error("database");
-    return true;
+    if (!limiter.ok) throw new Error("rate limit service");
+    return (await limiter.json()) === true;
   }
   function parseBody() {
     try { return JSON.parse(event.body || "{}"); } catch (_) { return null; }
