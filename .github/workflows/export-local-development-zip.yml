@@ -1,0 +1,32 @@
+name: Export Uttarkunth local development ZIP
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/export-local-development-zip.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout complete website repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Create downloadable source ZIP
+        run: |
+          mkdir -p dist-export
+          git archive --format=zip --output=dist-export/Uttarkunth-Stays-Local-Development.zip HEAD
+          sha256sum dist-export/Uttarkunth-Stays-Local-Development.zip > dist-export/SHA256SUMS.txt
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Uttarkunth-Stays-Local-Development
+          path: dist-export/*
+          if-no-files-found: error
+          retention-days: 3
