@@ -1,625 +1,199 @@
-import React, { useState } from 'react';
-import { Property, RoomType, Reservation } from '../types/database.types';
-import { staysStore } from '../lib/staysStore';
-import { RazorpayService } from '../lib/razorpay';
-import { PropertyMapView } from '../components/stays/PropertyMapView';
-import { RazorpayTestModal } from '../components/stays/RazorpayTestModal';
-import {
-  MapPin,
-  Calendar,
-  Users,
-  Search,
-  CheckCircle,
-  Wifi,
-  Coffee,
-  Flame,
-  Mountain,
-  Shield,
-  Navigation,
-  ArrowRight,
-  ExternalLink,
-  Info,
-  Clock,
-  Sparkles,
-  ChevronLeft,
-} from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ArrowRight, CalendarDays, CheckCircle2, Clock3, MapPin, Search, ShieldCheck, Users, Wifi, Coffee, Mountain, X, KeyRound, LoaderCircle } from 'lucide-react';
+import { staysApi, PublicProperty, PublicRoom, BookingRequestReceipt } from '../lib/staysApi';
 
 interface StaysViewProps {
   onNavigateToHost?: () => void;
   onNavigateToTrips?: () => void;
 }
+type BookingForm = { name: string; email: string; phone: string; adults: number; children: number; notes: string };
+const initialForm: BookingForm = { name: '', email: '', phone: '', adults: 2, children: 0, notes: '' };
+function dateOffset(days: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function photoUrl(property: PublicProperty) {
+  const photo = property.photos?.[0];
+  if (typeof photo === 'string') return photo;
+  return photo?.url || photo?.public_url || photo?.src || '';
+}
+function money(value: number) {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
+}
 
 export const StaysView: React.FC<StaysViewProps> = ({ onNavigateToHost, onNavigateToTrips }) => {
-  const [properties] = useState<Property[]>(staysStore.getProperties('approved'));
-  const [selectedProperty, setSelectedProperty] = useState<Property | null>(properties[0] || null);
-  const [selectedRoom, setSelectedRoom] = useState<RoomType | null>(null);
-
-  // Search Filters
-  const [searchDestination, setSearchDestination] = useState('');
-  const [checkInDate, setCheckInDate] = useState('2026-10-15');
-  const [checkOutDate, setCheckOutDate] = useState('2026-10-18');
+  const [properties, setProperties] = useState<PublicProperty[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [query, setQuery] = useState('');
+  const [checkIn, setCheckIn] = useState(dateOffset(7));
+  const [checkOut, setCheckOut] = useState(dateOffset(9));
   const [guestCount, setGuestCount] = useState(2);
-  const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
+  const [selectedRoom, setSelectedRoom] = useState<{ property: PublicProperty; room: PublicRoom } | null>(null);
+  const [form, setForm] = useState<BookingForm>(initialForm);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [receipt, setReceipt] = useState<BookingRequestReceipt | null>(null);
+  const [trackingOpen, setTrackingOpen] = useState(false);
+  const [trackingReference, setTrackingReference] = useState('');
+  const [trackingToken, setTrackingToken] = useState('');
+  const [trackingResult, setTrackingResult] = useState<Record<string, unknown> | null>(null);
+  const [trackingError, setTrackingError] = useState('');
+  const [trackingBusy, setTrackingBusy] = useState(false);
 
-  // Checkout State
-  const [isCheckingOut, setIsCheckingOut] = useState(false);
-  const [guestName, setGuestName] = useState('Priya Sharma');
-  const [guestEmail, setGuestEmail] = useState('priya@example.com');
-  const [activeRazorpayOrder, setActiveRazorpayOrder] = useState<{ id: string; amount: number } | null>(null);
-  const [confirmedBooking, setConfirmedBooking] = useState<Reservation | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    staysApi.listProperties()
+      .then((result) => { if (active) setProperties(result.properties); })
+      .catch((error: Error) => { if (active) setLoadError(error.message || 'Unable to load stays.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
 
-  // Filter properties by destination query
-  const filteredProperties = properties.filter((p) => {
-    if (!searchDestination.trim()) return true;
-    const q = searchDestination.toLowerCase();
-    return (
-      p.property_name.toLowerCase().includes(q) ||
-      p.locality?.toLowerCase().includes(q) ||
-      p.city.toLowerCase().includes(q) ||
-      p.district.toLowerCase().includes(q)
-    );
-  });
+  const filtered = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return properties;
+    return properties.filter((p) => [p.name, p.village, p.district, p.state, p.address, p.description].some((v) => String(v || '').toLowerCase().includes(term)));
+  }, [properties, query]);
+  const nights = Math.max(0, Math.round((Date.parse(checkOut + 'T00:00:00Z') - Date.parse(checkIn + 'T00:00:00Z')) / 86400000));
 
-  const propertyRooms = selectedProperty ? staysStore.getRoomTypesForProperty(selectedProperty.id) : [];
-
-  // Calculate nights
-  const nights = Math.max(
-    1,
-    Math.round((new Date(checkOutDate).getTime() - new Date(checkInDate).getTime()) / (1000 * 3600 * 24))
-  );
-
-  // Initiate Booking & Temporary Hold
-  const handleInitiateBooking = async (room: RoomType) => {
-    setErrorMessage(null);
-    setSelectedRoom(room);
-
-    // 1. Check availability
-    const avail = staysStore.checkAvailability(room.id, checkInDate, checkOutDate, 1);
-    if (!avail.available) {
-      setErrorMessage(`These dates are no longer available (${avail.remaining} left). Please choose other dates.`);
-      return;
-    }
-
-    // 2. Calculate Total
-    const total = room.base_price * nights;
-
-    // 3. Create Razorpay Test Order
-    const order = await RazorpayService.createTestOrder(total, `BOOK-${Date.now()}`);
-    setActiveRazorpayOrder({ id: order.id, amount: total });
-    setIsCheckingOut(true);
+  const openRequest = (property: PublicProperty, room: PublicRoom) => {
+    setSelectedRoom({ property, room });
+    setForm((current) => ({ ...current, adults: Math.min(current.adults, room.max_guests), children: Math.min(current.children, Math.max(0, room.max_guests - current.adults)) }));
+    setFormError('');
+    setReceipt(null);
   };
 
-  // Payment Success Handler
-  const handlePaymentSuccess = (paymentDetails: {
-    razorpay_payment_id: string;
-    razorpay_order_id: string;
-    razorpay_signature: string;
-  }) => {
-    if (!selectedProperty || !selectedRoom || !activeRazorpayOrder) return;
+  const submitRequest = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedRoom) return;
+    if (!checkIn || !checkOut || nights < 1 || checkIn < dateOffset(0)) {
+      setFormError('Please choose valid future check-in and check-out dates.');
+      return;
+    }
+    if (form.adults + form.children > selectedRoom.room.max_guests) {
+      setFormError(`This room can accommodate up to ${selectedRoom.room.max_guests} guests.`);
+      return;
+    }
+    setSubmitting(true);
+    setFormError('');
+    try {
+      const result = await staysApi.requestBooking({
+        room_unit_id: selectedRoom.room.id,
+        guest_name: form.name,
+        guest_email: form.email,
+        guest_phone: form.phone,
+        check_in: checkIn,
+        check_out: checkOut,
+        adults: form.adults,
+        children: form.children,
+        special_requests: form.notes,
+      });
+      setReceipt(result.booking);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Could not submit your request. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
-    const result = staysStore.confirmReservationAtomic({
-      guestId: 'guest-current-user',
-      guestName,
-      guestEmail,
-      propertyId: selectedProperty.id,
-      roomTypeId: selectedRoom.id,
-      checkIn: checkInDate,
-      checkOut: checkOutDate,
-      guests: guestCount,
-      rooms: 1,
-      totalAmount: activeRazorpayOrder.amount,
-      razorpayOrderId: paymentDetails.razorpay_order_id,
-      razorpayPaymentId: paymentDetails.razorpay_payment_id,
-      razorpaySignature: paymentDetails.razorpay_signature,
-    });
-
-    if (result.success && result.reservation) {
-      setConfirmedBooking(result.reservation);
-      setActiveRazorpayOrder(null);
-      setIsCheckingOut(false);
-    } else {
-      setErrorMessage(result.error || 'Could not confirm booking. Please try again.');
-      setActiveRazorpayOrder(null);
+  const trackRequest = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setTrackingBusy(true);
+    setTrackingError('');
+    setTrackingResult(null);
+    try {
+      const result = await staysApi.trackBooking(trackingReference, trackingToken);
+      setTrackingResult(result.booking);
+    } catch (error) {
+      setTrackingError(error instanceof Error ? error.message : 'Could not find that request.');
+    } finally {
+      setTrackingBusy(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-[#FBF9F5] text-stone-900 pb-20">
-      {/* 1. HERO BANNER */}
-      <section className="bg-[#163E2E] text-white pt-14 pb-16 px-4 sm:px-6 lg:px-8 border-b border-[#214738]">
-        <div className="max-w-7xl mx-auto space-y-6">
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-            <div className="space-y-3">
-              <span className="text-xs uppercase tracking-widest text-[#D8773E] font-semibold flex items-center gap-2">
-                <Sparkles size={14} />
-                <span>Uttarkunth Stays • Mountain Hospitality Network</span>
-              </span>
-              <h1 className="text-3xl sm:text-5xl font-serif font-bold text-white tracking-tight">
-                Stay Somewhere Meaningful.
-              </h1>
-              <p className="text-sm sm:text-base text-[#D1E0D7] max-w-2xl font-light leading-relaxed">
-                Discover verified homestays, cottages, and retreats rooted in Himalayan culture and warm community hosting.
-              </p>
+      <section className="bg-[#163E2E] text-white px-4 sm:px-6 lg:px-8 pt-12 pb-14 border-b border-[#214738]">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-8">
+            <div className="max-w-3xl space-y-4">
+              <span className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-[#E9A16F] font-semibold"><Mountain size={15}/> Uttarkunth Stays · Himalayan Hospitality</span>
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-serif font-semibold leading-tight">Stay somewhere<br/><span className="text-[#D9E6DB] italic">meaningful.</span></h1>
+              <p className="text-sm sm:text-base text-[#D1E0D7] max-w-xl leading-relaxed">Find welcoming homestays and mountain retreats, hosted by people who know these places as home. Browse openly, request directly, and travel thoughtfully.</p>
+              <div className="flex flex-wrap gap-4 pt-1 text-xs text-[#D1E0D7]">
+                <span className="flex items-center gap-2"><ShieldCheck size={15}/> Reviewed listings</span>
+                <span className="flex items-center gap-2"><Coffee size={15}/> Local hospitality</span>
+                <span className="flex items-center gap-2"><Wifi size={15}/> Work-from-mountains friendly</span>
+              </div>
             </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              {onNavigateToHost && (
-                <button
-                  onClick={onNavigateToHost}
-                  className="px-5 py-2.5 bg-[#B85D28] hover:bg-[#964218] text-white text-xs font-semibold uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5"
-                >
-                  <span>List Your Property (0% Year 1)</span>
-                  <ArrowRight size={13} />
-                </button>
-              )}
-              {onNavigateToTrips && (
-                <button
-                  onClick={onNavigateToTrips}
-                  className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-medium uppercase tracking-wider transition-all border border-white/20"
-                >
-                  My Trips
-                </button>
-              )}
+            <div className="flex flex-wrap gap-3">
+              <button onClick={() => setTrackingOpen(true)} className="px-4 py-3 border border-white/30 hover:bg-white/10 text-white text-xs font-semibold uppercase tracking-wider">Track a request</button>
+              {onNavigateToTrips && <button onClick={onNavigateToTrips} className="px-4 py-3 bg-white text-[#163E2E] hover:bg-[#E8EEE8] text-xs font-semibold uppercase tracking-wider">My Trips <ArrowRight size={14} className="inline ml-1"/></button>}
+              {onNavigateToHost && <button onClick={onNavigateToHost} className="px-4 py-3 bg-[#B85D28] hover:bg-[#964218] text-white text-xs font-semibold uppercase tracking-wider">List your property</button>}
             </div>
           </div>
-
-          {/* Search Filter Bar */}
-          <div className="bg-white rounded-xl shadow-xl p-4 border border-stone-200 text-stone-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div>
-              <label className="text-[10px] uppercase tracking-wider font-bold text-stone-500 block mb-1">
-                Destination
-              </label>
-              <div className="flex items-center gap-2 px-3 py-2 bg-stone-50 rounded-lg border border-stone-200">
-                <MapPin size={16} className="text-[#B85D28] shrink-0" />
-                <input
-                  type="text"
-                  placeholder="Parvati, Jari, Kullu..."
-                  value={searchDestination}
-                  onChange={(e) => setSearchDestination(e.target.value)}
-                  className="bg-transparent text-xs w-full focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-[10px] uppercase tracking-wider font-bold text-stone-500 block mb-1">
-                Check In
-              </label>
-              <div className="flex items-center gap-2 px-3 py-2 bg-stone-50 rounded-lg border border-stone-200">
-                <Calendar size={16} className="text-[#163E2E] shrink-0" />
-                <input
-                  type="date"
-                  value={checkInDate}
-                  onChange={(e) => setCheckInDate(e.target.value)}
-                  className="bg-transparent text-xs w-full focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-[10px] uppercase tracking-wider font-bold text-stone-500 block mb-1">
-                Check Out
-              </label>
-              <div className="flex items-center gap-2 px-3 py-2 bg-stone-50 rounded-lg border border-stone-200">
-                <Calendar size={16} className="text-[#163E2E] shrink-0" />
-                <input
-                  type="date"
-                  value={checkOutDate}
-                  onChange={(e) => setCheckOutDate(e.target.value)}
-                  className="bg-transparent text-xs w-full focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-[10px] uppercase tracking-wider font-bold text-stone-500 block mb-1">
-                Guests
-              </label>
-              <div className="flex items-center gap-2 px-3 py-2 bg-stone-50 rounded-lg border border-stone-200">
-                <Users size={16} className="text-stone-500 shrink-0" />
-                <select
-                  value={guestCount}
-                  onChange={(e) => setGuestCount(Number(e.target.value))}
-                  className="bg-transparent text-xs w-full focus:outline-none"
-                >
-                  <option value={1}>1 Guest</option>
-                  <option value={2}>2 Guests</option>
-                  <option value={3}>3 Guests</option>
-                  <option value={4}>4+ Guests</option>
-                </select>
-              </div>
-            </div>
+          <div className="mt-9 bg-white rounded-xl p-3 sm:p-4 shadow-xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.5fr_1fr_1fr_0.8fr_auto] gap-3">
+            <label className="flex items-center gap-3 px-3 py-2 border border-stone-200 rounded-lg text-stone-500"><Search size={17}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Where would you like to go?" className="w-full text-sm outline-none text-stone-900 placeholder:text-stone-400"/></label>
+            <label className="flex items-center gap-2 px-3 py-2 border border-stone-200 rounded-lg text-stone-500"><CalendarDays size={16}/><span className="text-[10px] uppercase tracking-wider">Check in</span><input type="date" min={dateOffset(0)} value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className="w-full min-w-0 text-xs text-stone-900 outline-none"/></label>
+            <label className="flex items-center gap-2 px-3 py-2 border border-stone-200 rounded-lg text-stone-500"><CalendarDays size={16}/><span className="text-[10px] uppercase tracking-wider">Check out</span><input type="date" min={checkIn || dateOffset(0)} value={checkOut} onChange={(e) => setCheckOut(e.target.value)} className="w-full min-w-0 text-xs text-stone-900 outline-none"/></label>
+            <label className="flex items-center gap-2 px-3 py-2 border border-stone-200 rounded-lg text-stone-500"><Users size={16}/><select value={guestCount} onChange={(e) => setGuestCount(Number(e.target.value))} className="w-full text-sm text-stone-900 outline-none bg-transparent">{[1,2,3,4,5,6,7,8].map((n) => <option key={n} value={n}>{n} guest{n > 1 ? 's' : ''}</option>)}</select></label>
+            <button onClick={() => document.getElementById('stays-results')?.scrollIntoView({ behavior: 'smooth' })} className="px-6 py-3 bg-[#163E2E] hover:bg-[#0F2E22] rounded-lg text-white text-xs font-semibold uppercase tracking-wider">Explore stays</button>
           </div>
         </div>
       </section>
 
-      {/* 2. CONFIRMED BOOKING BANNER (If recently confirmed) */}
-      {confirmedBooking && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
-          <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-5 text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm animate-in fade-in duration-300">
-            <div className="flex items-start gap-3">
-              <CheckCircle size={24} className="text-emerald-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-serif font-bold text-base">Booking Confirmed: {confirmedBooking.booking_reference}</p>
-                <p className="text-xs text-emerald-700 mt-0.5">
-                  Your reservation at <strong>{confirmedBooking.property_name}</strong> ({confirmedBooking.room_name}) from {confirmedBooking.check_in} to {confirmedBooking.check_out} is locked and confirmed!
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                if (onNavigateToTrips) onNavigateToTrips();
-              }}
-              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-xs font-semibold uppercase tracking-wider transition-colors shrink-0"
-            >
-              View in My Trips
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Error Message */}
-      {errorMessage && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
-          <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs flex items-center justify-between">
-            <span>{errorMessage}</span>
-            <button onClick={() => setErrorMessage(null)} className="font-bold underline text-xs">Dismiss</button>
-          </div>
-        </div>
-      )}
-
-      {/* 3. MAIN EXPLORER AREA */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
-        {/* View Mode Toggle */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            <span className="font-serif font-bold text-xl text-stone-900">
-              {filteredProperties.length} Verified Himalayan Stays
-            </span>
-            <span className="text-xs bg-[#163E2E]/10 text-[#163E2E] font-medium px-2 py-0.5 rounded-full">
-              Zero Fake Listings
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1 bg-stone-200/80 p-1 rounded-lg">
-            <button
-              onClick={() => setViewMode('grid')}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                viewMode === 'grid' ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-600 hover:text-stone-900'
-              }`}
-            >
-              Listings View
-            </button>
-            <button
-              onClick={() => setViewMode('map')}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                viewMode === 'map' ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-600 hover:text-stone-900'
-              }`}
-            >
-              Map Explorer
-            </button>
-          </div>
+      <main id="stays-results" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-6">
+          <div><span className="text-xs uppercase tracking-[0.18em] text-[#B85D28] font-semibold">Thoughtfully hosted</span><h2 className="text-2xl sm:text-3xl font-serif font-semibold mt-1">Find your mountain stay</h2></div>
+          <p className="text-xs text-stone-500">{filtered.length} {filtered.length === 1 ? 'property' : 'properties'} · {nights > 0 ? `${nights} nights selected` : 'Choose your dates'}</p>
         </div>
 
-        {/* MAP VIEW */}
-        {viewMode === 'map' ? (
-          <div className="space-y-6">
-            <PropertyMapView
-              properties={filteredProperties}
-              selectedProperty={selectedProperty}
-              onSelectProperty={(prop) => {
-                setSelectedProperty(prop);
-                setViewMode('grid');
-              }}
-            />
+        {loading && <div className="py-20 flex items-center justify-center gap-3 text-stone-500"><LoaderCircle className="animate-spin" size={20}/> Loading verified stays…</div>}
+        {!loading && loadError && <div className="p-6 rounded-xl bg-white border border-stone-200"><p className="font-semibold text-stone-900">Stays are temporarily unavailable</p><p className="text-sm text-stone-600 mt-1">{loadError}</p><button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-[#163E2E] text-white text-xs uppercase tracking-wider">Try again</button></div>}
+        {!loading && !loadError && filtered.length === 0 && <div className="text-center py-16 bg-white rounded-xl border border-stone-200"><Mountain className="mx-auto text-stone-400" size={36}/><h3 className="font-serif text-xl font-semibold mt-4">No listed stays match that search yet</h3><p className="text-sm text-stone-500 mt-2">Try a nearby village or clear your search.</p><button onClick={() => setQuery('')} className="mt-4 text-sm underline text-[#163E2E]">Clear search</button></div>}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {filtered.map((property) => {
+            const image = photoUrl(property);
+            const rooms = property.rooms.filter((room) => room.max_guests >= guestCount);
+            const lowest = property.rooms.length ? Math.min(...property.rooms.map((room) => Number(room.base_price))) : 0;
+            return <article key={property.id} className="bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-shadow">
+              <div className="relative h-56 bg-[#E5E7DF]">{image ? <img src={image} alt={property.name} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-[#163E2E]"><Mountain size={44}/></div>}<span className="absolute left-4 top-4 px-3 py-1.5 rounded-full bg-white/95 text-[10px] uppercase tracking-wider font-bold text-[#163E2E]">Reviewed listing</span></div>
+              <div className="p-5">
+                <div className="flex items-start justify-between gap-3"><div><p className="flex items-center gap-1 text-xs text-stone-500"><MapPin size={13}/>{[property.village, property.district, property.state].filter(Boolean).join(', ')}</p><h3 className="font-serif text-xl font-semibold mt-1">{property.name}</h3></div><div className="text-right shrink-0"><span className="text-lg font-serif font-bold text-[#163E2E]">{money(lowest)}</span><span className="block text-[10px] text-stone-500">starting / night</span></div></div>
+                <p className="text-sm text-stone-600 leading-relaxed mt-3 line-clamp-3">{property.description || 'A locally hosted stay in the Himalayas.'}</p>
+                {property.amenities?.length > 0 && <div className="flex flex-wrap gap-2 mt-4">{property.amenities.slice(0,4).map((amenity, i) => <span key={i} className="px-2.5 py-1 bg-[#F3F5F0] text-stone-600 text-[10px] rounded-full">{typeof amenity === 'string' ? amenity : String((amenity as {name?:string}).name || 'Amenity')}</span>)}</div>}
+                <div className="border-t border-stone-100 mt-5 pt-4 space-y-3">
+                  {rooms.length === 0 ? <p className="text-xs text-stone-500">No room currently matches {guestCount} guests. Adjust guest count to see other room options.</p> : rooms.map((room) => <div key={room.id} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-[#F8F8F4] border border-stone-100"><div className="min-w-0"><p className="font-semibold text-sm truncate">{room.room_name}</p><p className="text-[11px] text-stone-500 mt-0.5">Up to {room.max_guests} guests · {money(Number(room.base_price))}/night</p>{nights > 0 && <p className="text-[11px] text-[#163E2E] font-semibold mt-1">Estimate: {money(Number(room.base_price) * nights)}</p>}</div><button onClick={() => openRequest(property, room)} className="shrink-0 px-3 py-2 bg-[#163E2E] hover:bg-[#0F2E22] text-white rounded-lg text-[10px] font-bold uppercase tracking-wider">Request</button></div>)}
+                </div>
+              </div>
+            </article>;
+          })}
+        </div>
+        <div className="mt-10 p-5 sm:p-6 bg-[#EEF2EA] rounded-2xl border border-[#D7E1D4] flex flex-col sm:flex-row sm:items-center gap-4"><ShieldCheck className="text-[#163E2E] shrink-0" size={28}/><div className="flex-1"><h3 className="font-serif font-semibold text-lg text-[#163E2E]">A more thoughtful way to stay</h3><p className="text-sm text-stone-600 mt-1">Your request goes to the host for confirmation. No online payment is collected on this first release. Please keep your booking reference and private tracking token safe.</p></div><span className="text-xs font-bold text-[#163E2E] whitespace-nowrap">0% introductory commission*</span></div>
+      </main>
+
+      {selectedRoom && <div className="fixed inset-0 z-50 bg-black/55 p-3 sm:p-6 overflow-y-auto flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Request a stay">
+        <div className="bg-[#FBF9F5] w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden">
+          <div className="bg-[#163E2E] text-white p-5 sm:p-6 flex items-start justify-between gap-4"><div><p className="text-[10px] uppercase tracking-[0.18em] text-[#E9A16F]">Request to book</p><h2 className="font-serif text-2xl font-semibold mt-1">{selectedRoom.property.name}</h2><p className="text-xs text-[#D1E0D7] mt-1">{selectedRoom.room.room_name}</p></div><button onClick={() => { setSelectedRoom(null); setReceipt(null); }} aria-label="Close" className="p-2 hover:bg-white/10 rounded-lg"><X size={19}/></button></div>
+          <div className="p-5 sm:p-6">
+            {receipt ? <div className="space-y-5"><div className="flex items-center gap-3 text-[#166534]"><CheckCircle2 size={30}/><div><h3 className="font-serif text-xl font-semibold">Request sent successfully</h3><p className="text-sm text-stone-600">Your booking is pending host confirmation.</p></div></div><div className="bg-white border border-stone-200 rounded-xl p-4 space-y-3"><div className="flex justify-between gap-4"><span className="text-xs text-stone-500">Booking reference</span><strong className="font-mono text-sm">{receipt.reference}</strong></div><div className="flex justify-between gap-4"><span className="text-xs text-stone-500">Status</span><strong className="text-amber-700 text-sm">Pending</strong></div><div className="flex justify-between gap-4"><span className="text-xs text-stone-500">Estimated total</span><strong>{money(receipt.estimated_total)}</strong></div><div className="pt-3 border-t border-stone-100"><p className="text-xs font-semibold flex items-center gap-2"><KeyRound size={14}/> Private tracking token — copy and save it now</p><p className="font-mono text-xs break-all bg-stone-50 p-3 rounded-lg mt-2 select-all">{receipt.access_token}</p><button onClick={() => navigator.clipboard?.writeText(`Reference: ${receipt.reference}\nTracking token: ${receipt.access_token}`)} className="mt-2 text-xs font-semibold underline text-[#163E2E]">Copy reference and token</button></div></div><p className="text-xs text-stone-500">Keep both the reference and token private. They are required to check the status of this request. No payment has been taken.</p><button onClick={() => { setTrackingReference(receipt.reference); setTrackingToken(receipt.access_token); setSelectedRoom(null); setReceipt(null); setTrackingOpen(true); }} className="w-full py-3 bg-[#163E2E] text-white rounded-lg text-xs font-bold uppercase tracking-wider">Track this request</button></div> : <form onSubmit={submitRequest} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><label className="text-xs font-semibold text-stone-700">Check-in<input required type="date" min={dateOffset(0)} value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className="block mt-1 w-full p-3 rounded-lg border border-stone-200 bg-white text-sm"/></label><label className="text-xs font-semibold text-stone-700">Check-out<input required type="date" min={checkIn || dateOffset(0)} value={checkOut} onChange={(e) => setCheckOut(e.target.value)} className="block mt-1 w-full p-3 rounded-lg border border-stone-200 bg-white text-sm"/></label></div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><label className="text-xs font-semibold text-stone-700">Your full name<input required maxLength={120} value={form.name} onChange={(e) => setForm({...form,name:e.target.value})} className="block mt-1 w-full p-3 rounded-lg border border-stone-200 bg-white text-sm" placeholder="Full name"/></label><label className="text-xs font-semibold text-stone-700">Email address<input required type="email" maxLength={254} value={form.email} onChange={(e) => setForm({...form,email:e.target.value})} className="block mt-1 w-full p-3 rounded-lg border border-stone-200 bg-white text-sm" placeholder="you@example.com"/></label></div>
+              <label className="block text-xs font-semibold text-stone-700">Phone number<input required type="tel" maxLength={40} value={form.phone} onChange={(e) => setForm({...form,phone:e.target.value})} className="block mt-1 w-full p-3 rounded-lg border border-stone-200 bg-white text-sm" placeholder="+91"/></label>
+              <div className="grid grid-cols-2 gap-3"><label className="text-xs font-semibold text-stone-700">Adults<select value={form.adults} onChange={(e) => setForm({...form,adults:Number(e.target.value)})} className="block mt-1 w-full p-3 rounded-lg border border-stone-200 bg-white text-sm">{Array.from({length:selectedRoom.room.max_guests},(_,i)=>i+1).map(n=><option key={n} value={n}>{n}</option>)}</select></label><label className="text-xs font-semibold text-stone-700">Children<select value={form.children} onChange={(e) => setForm({...form,children:Number(e.target.value)})} className="block mt-1 w-full p-3 rounded-lg border border-stone-200 bg-white text-sm">{Array.from({length:Math.max(0,selectedRoom.room.max_guests-form.adults)+1},(_,i)=>i).map(n=><option key={n} value={n}>{n}</option>)}</select></label></div>
+              <label className="block text-xs font-semibold text-stone-700">Special requests (optional)<textarea maxLength={1500} value={form.notes} onChange={(e) => setForm({...form,notes:e.target.value})} className="block mt-1 w-full p-3 rounded-lg border border-stone-200 bg-white text-sm min-h-20" placeholder="Arrival time, meal preferences, or questions"/></label>
+              {formError && <p role="alert" className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{formError}</p>}
+              <div className="bg-[#EEF2EA] p-3 rounded-lg text-xs text-stone-600"><p className="flex items-center gap-2 font-semibold text-[#163E2E]"><Clock3 size={14}/> {nights} night(s) · Estimated {money(Number(selectedRoom.room.base_price) * Math.max(0,nights))}</p><p className="mt-1">This is a request, not an instant confirmation. Pay at the property only after the host confirms your stay.</p></div>
+              <button disabled={submitting} className="w-full py-3.5 bg-[#163E2E] hover:bg-[#0F2E22] disabled:opacity-60 text-white rounded-lg text-xs font-bold uppercase tracking-[0.15em]">{submitting ? 'Sending request…' : 'Send booking request'}</button>
+            </form>}
           </div>
-        ) : (
-          /* GRID VIEW */
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {filteredProperties.map((prop) => {
-              const isSelected = selectedProperty?.id === prop.id;
-              return (
-                <div
-                  key={prop.id}
-                  onClick={() => setSelectedProperty(prop)}
-                  className={`bg-white rounded-2xl overflow-hidden border cursor-pointer transition-all duration-200 shadow-sm hover:shadow-md flex flex-col ${
-                    isSelected ? 'border-[#163E2E] ring-2 ring-[#163E2E]/20' : 'border-stone-200'
-                  }`}
-                >
-                  <div className="relative aspect-4/3 w-full bg-stone-100 overflow-hidden">
-                    <img
-                      src={prop.cover_image}
-                      alt={prop.property_name}
-                      className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
-                    />
-                    <div className="absolute top-3 left-3 bg-white/95 backdrop-blur-xs px-2.5 py-1 rounded-full text-[10px] font-bold text-[#163E2E] uppercase tracking-wider flex items-center gap-1 shadow-xs">
-                      <Shield size={12} className="text-[#163E2E]" />
-                      <span>Verified Stay</span>
-                    </div>
-                    <div className="absolute bottom-3 right-3 bg-black/70 backdrop-blur-xs text-white px-2.5 py-1 rounded-md text-xs font-serif font-bold">
-                      ₹{prop.starting_price?.toLocaleString('en-IN')} / night
-                    </div>
-                  </div>
+        </div>
+      </div>}
 
-                  <div className="p-5 flex-1 flex flex-col justify-between space-y-3">
-                    <div>
-                      <div className="flex items-center justify-between text-xs text-stone-500 mb-1">
-                        <span>{prop.locality}, {prop.city}</span>
-                        <span className="font-semibold text-amber-700">★ {prop.rating}</span>
-                      </div>
-                      <h3 className="font-serif font-bold text-lg text-stone-900 leading-snug">
-                        {prop.property_name}
-                      </h3>
-                      <p className="text-xs text-stone-600 line-clamp-2 mt-1.5 leading-relaxed font-light">
-                        {prop.short_description || prop.description}
-                      </p>
-                    </div>
-
-                    <div className="pt-2 border-t border-stone-100 flex items-center justify-between text-xs">
-                      <span className="text-[11px] text-stone-500 capitalize">{prop.property_type.replace('_', ' ')}</span>
-                      <button className="text-[#B85D28] hover:text-[#964218] font-bold text-xs flex items-center gap-1">
-                        <span>View Rooms</span>
-                        <ArrowRight size={13} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* 4. SELECTED PROPERTY DETAILS & ROOM SELECTION */}
-        {selectedProperty && (
-          <div className="mt-14 pt-12 border-t border-stone-200 space-y-10 animate-in fade-in duration-200">
-            {/* Header info */}
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
-              <div className="space-y-2">
-                <span className="text-xs uppercase tracking-widest text-[#B85D28] font-bold">
-                  Selected Homestay Details
-                </span>
-                <h2 className="text-2xl sm:text-4xl font-serif font-bold text-stone-900">
-                  {selectedProperty.property_name}
-                </h2>
-                <div className="flex items-center gap-3 text-xs text-stone-600">
-                  <span className="flex items-center gap-1 text-[#163E2E] font-medium">
-                    <MapPin size={14} />
-                    <span>{selectedProperty.address}, {selectedProperty.city}</span>
-                  </span>
-                  <span>•</span>
-                  <a
-                    href={`https://www.google.com/maps/dir/?api=1&destination=${selectedProperty.latitude},${selectedProperty.longitude}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[#B85D28] hover:underline font-semibold"
-                  >
-                    <Navigation size={13} />
-                    <span>Get Directions on Google Maps</span>
-                    <ExternalLink size={10} />
-                  </a>
-                </div>
-              </div>
-
-              <div className="bg-[#163E2E]/5 border border-[#163E2E]/20 p-4 rounded-xl flex items-center gap-3">
-                <Shield size={24} className="text-[#163E2E] shrink-0" />
-                <div className="text-xs text-stone-700">
-                  <p className="font-bold text-[#163E2E]">Uttarkunth Host Guarantee</p>
-                  <p className="text-[11px] text-stone-500">Every room inspected. Zero unauthorized commercial commissions.</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Photo Gallery Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-2xl overflow-hidden">
-              <div className="sm:col-span-2 aspect-16/10 bg-stone-100 overflow-hidden">
-                <img
-                  src={selectedProperty.images?.[0] || selectedProperty.cover_image}
-                  alt={selectedProperty.property_name}
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-1 gap-3">
-                <div className="aspect-16/10 bg-stone-100 overflow-hidden rounded-lg sm:rounded-none">
-                  <img
-                    src={selectedProperty.images?.[1] || selectedProperty.cover_image}
-                    alt="Property detail"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="aspect-16/10 bg-stone-100 overflow-hidden rounded-lg sm:rounded-none">
-                  <img
-                    src={selectedProperty.images?.[2] || selectedProperty.cover_image}
-                    alt="Property scenery"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* About & Amenities */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-              <div className="lg:col-span-2 space-y-6">
-                <div className="space-y-3">
-                  <h3 className="font-serif font-bold text-xl text-stone-900">About this Himalayan Stay</h3>
-                  <p className="text-sm sm:text-base text-stone-700 leading-relaxed font-light">
-                    {selectedProperty.description}
-                  </p>
-                </div>
-
-                {/* Amenities */}
-                <div className="pt-4 border-t border-stone-100 space-y-3">
-                  <h4 className="font-serif font-bold text-base text-stone-900">Included Amenities</h4>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs text-stone-700">
-                    <div className="flex items-center gap-2 p-2.5 bg-stone-50 rounded-lg">
-                      <Wifi size={16} className="text-[#163E2E]" />
-                      <span>Fast Mountain Fiber Wi-Fi</span>
-                    </div>
-                    <div className="flex items-center gap-2 p-2.5 bg-stone-50 rounded-lg">
-                      <Mountain size={16} className="text-[#163E2E]" />
-                      <span>Valley & Ridge Views</span>
-                    </div>
-                    <div className="flex items-center gap-2 p-2.5 bg-stone-50 rounded-lg">
-                      <Coffee size={16} className="text-[#163E2E]" />
-                      <span>Home-cooked Organic Meals</span>
-                    </div>
-                    <div className="flex items-center gap-2 p-2.5 bg-stone-50 rounded-lg">
-                      <Flame size={16} className="text-[#163E2E]" />
-                      <span>Wood Bukhari / Heating</span>
-                    </div>
-                    <div className="flex items-center gap-2 p-2.5 bg-stone-50 rounded-lg">
-                      <Clock size={16} className="text-[#163E2E]" />
-                      <span>Check-in: {selectedProperty.check_in_time.slice(0, 5)}</span>
-                    </div>
-                    <div className="flex items-center gap-2 p-2.5 bg-stone-50 rounded-lg">
-                      <Shield size={16} className="text-[#163E2E]" />
-                      <span>Verified Host Onsite</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* House Rules & Policies */}
-                <div className="pt-4 border-t border-stone-100 space-y-2">
-                  <h4 className="font-serif font-bold text-base text-stone-900">Community Respect & Rules</h4>
-                  <ul className="list-disc list-inside text-xs text-stone-600 space-y-1">
-                    {selectedProperty.house_rules.map((rule, idx) => (
-                      <li key={idx}>{rule}</li>
-                    ))}
-                    <li>Cancellation policy: <strong>{selectedProperty.cancellation_policy}</strong> (Full refund prior to 5 days before check-in).</li>
-                  </ul>
-                </div>
-              </div>
-
-              {/* ROOM TYPES & DIRECT BOOKING CARD */}
-              <div className="space-y-4">
-                <div className="bg-white rounded-2xl p-6 border border-stone-200 shadow-lg space-y-6">
-                  <div>
-                    <span className="text-[10px] uppercase tracking-widest text-[#B85D28] font-bold block mb-1">
-                      Live Availability Engine
-                    </span>
-                    <h3 className="font-serif font-bold text-xl text-stone-900">Select Room & Book</h3>
-                    <p className="text-xs text-stone-500 mt-1">
-                      Selected: <strong>{nights} night(s)</strong> ({checkInDate} to {checkOutDate})
-                    </p>
-                  </div>
-
-                  {/* Room List */}
-                  <div className="space-y-3">
-                    {propertyRooms.map((room) => {
-                      const avail = staysStore.checkAvailability(room.id, checkInDate, checkOutDate, 1);
-                      const isRoomAvailable = avail.available;
-
-                      return (
-                        <div
-                          key={room.id}
-                          className={`p-4 rounded-xl border transition-all ${
-                            isRoomAvailable
-                              ? 'border-stone-200 hover:border-[#163E2E] bg-stone-50/50'
-                              : 'border-stone-200 bg-stone-100 opacity-60'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <h4 className="font-serif font-bold text-sm text-stone-900">{room.name}</h4>
-                              <p className="text-[11px] text-stone-500 mt-0.5">{room.description}</p>
-                              <div className="mt-2 flex items-center gap-2 text-[11px]">
-                                <span className="text-stone-600">Up to {room.max_guests} guests</span>
-                                <span>•</span>
-                                <span className={`font-semibold ${isRoomAvailable ? 'text-emerald-700' : 'text-red-600'}`}>
-                                  {isRoomAvailable ? `${avail.remaining} room(s) left` : 'Sold out on these dates'}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <span className="font-serif font-bold text-base text-[#163E2E]">₹{room.base_price}</span>
-                              <span className="text-[10px] text-stone-500 block">/ night</span>
-                            </div>
-                          </div>
-
-                          <div className="mt-3 pt-3 border-t border-stone-200/60 flex items-center justify-between">
-                            <span className="text-xs font-semibold text-stone-800">
-                              Total: ₹{(room.base_price * nights).toLocaleString('en-IN')}
-                            </span>
-                            <button
-                              disabled={!isRoomAvailable}
-                              onClick={() => handleInitiateBooking(room)}
-                              className="px-4 py-2 bg-[#163E2E] hover:bg-[#0F2E22] text-white rounded text-xs font-semibold uppercase tracking-wider transition-colors disabled:bg-stone-300 disabled:cursor-not-allowed shadow-xs"
-                            >
-                              Book Now
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="p-3 bg-amber-50 rounded-lg border border-amber-200/80 text-[11px] text-amber-800 flex items-start gap-2">
-                    <Info size={14} className="shrink-0 mt-0.5 text-amber-600" />
-                    <span>
-                      <strong>Staging Test Mode Active:</strong> Payments processed via Razorpay Sandbox with simulated test credentials.
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* NEARBY UTTARKUNTH STAYS (Section 31 requirement) */}
-            <div className="pt-10 border-t border-stone-200 space-y-4">
-              <div className="space-y-1">
-                <span className="text-xs uppercase tracking-widest text-[#B85D28] font-bold">
-                  Explore More
-                </span>
-                <h3 className="text-xl sm:text-2xl font-serif font-bold text-stone-900">
-                  Nearby Verified Uttarkunth Stays
-                </h3>
-                <p className="text-xs text-stone-500">
-                  Authentic community-hosted properties in the same mountain corridor.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {properties
-                  .filter((p) => p.id !== selectedProperty.id)
-                  .slice(0, 2)
-                  .map((nearby) => (
-                    <div
-                      key={nearby.id}
-                      onClick={() => {
-                        setSelectedProperty(nearby);
-                        window.scrollTo({ top: 400, behavior: 'smooth' });
-                      }}
-                      className="p-4 bg-white rounded-xl border border-stone-200 hover:border-[#163E2E] cursor-pointer shadow-xs transition-all flex gap-3"
-                    >
-                      <img
-                        src={nearby.cover_image}
-                        alt={nearby.property_name}
-                        className="w-20 h-20 rounded-lg object-cover shrink-0"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[10px] text-stone-500 uppercase tracking-wider">{nearby.locality}</span>
-                        <h4 className="font-serif font-bold text-sm text-stone-900 truncate mt-0.5">{nearby.property_name}</h4>
-                        <p className="text-xs font-serif font-bold text-[#163E2E] mt-1">₹{nearby.starting_price} / night</p>
-                        <span className="text-[11px] text-[#B85D28] font-semibold mt-1 inline-block">Switch to this stay →</span>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 5. RAZORPAY TEST MODAL (Checkout Engine) */}
-      {isCheckingOut && activeRazorpayOrder && selectedProperty && selectedRoom && (
-        <RazorpayTestModal
-          orderId={activeRazorpayOrder.id}
-          amount={activeRazorpayOrder.amount}
-          propertyName={selectedProperty.property_name}
-          roomName={selectedRoom.name}
-          onSuccess={handlePaymentSuccess}
-          onClose={() => setIsCheckingOut(false)}
-        />
-      )}
+      {trackingOpen && <div className="fixed inset-0 z-50 bg-black/55 p-3 sm:p-6 overflow-y-auto flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Track booking request"><div className="bg-[#FBF9F5] w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden"><div className="bg-[#163E2E] text-white p-5 flex justify-between items-center"><div><h2 className="font-serif text-xl font-semibold">Track your request</h2><p className="text-xs text-[#D1E0D7] mt-1">Use the reference and private token from your confirmation.</p></div><button onClick={() => {setTrackingOpen(false);setTrackingResult(null);setTrackingError('');}} aria-label="Close"><X size={19}/></button></div><div className="p-5 space-y-4"><form onSubmit={trackRequest} className="space-y-3"><label className="block text-xs font-semibold">Booking reference<input required value={trackingReference} onChange={(e)=>setTrackingReference(e.target.value)} className="block mt-1 w-full p-3 rounded-lg border border-stone-200 bg-white font-mono text-sm" placeholder="UK-…"/></label><label className="block text-xs font-semibold">Private tracking token<input required value={trackingToken} onChange={(e)=>setTrackingToken(e.target.value)} className="block mt-1 w-full p-3 rounded-lg border border-stone-200 bg-white font-mono text-xs" placeholder="Paste your token"/></label><button disabled={trackingBusy} className="w-full py-3 bg-[#163E2E] text-white rounded-lg text-xs font-bold uppercase tracking-wider">{trackingBusy?'Checking…':'Check request status'}</button></form>{trackingError && <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 p-3 rounded-lg">{trackingError}</p>}{trackingResult && <div className="bg-white border border-stone-200 rounded-xl p-4 text-sm space-y-2"><p className="font-semibold">{String(trackingResult.booking_reference || '')}</p><p>Status: <strong className="capitalize">{String(trackingResult.status || 'pending')}</strong></p><p>Dates: {String(trackingResult.check_in || '')} → {String(trackingResult.check_out || '')}</p><p>Estimated total: {money(Number(trackingResult.estimated_total || 0))}</p><p className="text-xs text-stone-500">Contact the host if you need to change a confirmed booking.</p></div>}</div></div></div>}
     </div>
   );
 };
