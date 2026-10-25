@@ -71,9 +71,10 @@ export const staysApi = {
     });
   },
   async trackBooking(reference: string, token: string) {
-    return api<{ ok: true; booking: Record<string, unknown> }>(
-      '/.netlify/functions/stays-bookings?reference=' + encodeURIComponent(reference) + '&token=' + encodeURIComponent(token),
-    );
+    return api<{ ok: true; booking: Record<string, unknown> }>('/.netlify/functions/stays-bookings', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'track', reference, token }),
+    });
   },
   async cancelPendingBooking(reference: string, token: string, reason?: string) {
     return api<{ ok: true; status: 'cancelled' }>('/.netlify/functions/stays-bookings', {

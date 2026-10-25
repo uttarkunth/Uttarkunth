@@ -1,4 +1,4 @@
-const crypto = require("crypto");
+import crypto from 'node:crypto';
 
 const headers = {
   "Content-Type": "application/json; charset=utf-8",
@@ -25,7 +25,7 @@ function safeText(value, max) {
   return String(value || "").trim().slice(0, max);
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   if (!["GET", "POST", "PATCH"].includes(event.httpMethod)) {
     return response(405, { ok: false, error: "Method not allowed." });
   }
@@ -47,20 +47,26 @@ exports.handler = async (event) => {
     if (!r.ok) throw new Error("database");
     return r.json();
   }
-  async function enforceCreateRateLimit(event) {
-    const forwarded = event.headers?.["x-nf-client-connection-ip"] ||
-      event.headers?.["X-Nf-Client-Connection-Ip"] ||
-      event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() || "unknown";
-    const ipHash = crypto.createHmac("sha256", serviceKey).update(String(forwarded)).digest("hex");
-    const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    const recent = await rows("/rest/v1/booking_rate_limits?select=id&ip_hash=eq." + ipHash + "&created_at=gte." + encodeURIComponent(since) + "&limit=8");
-    if (recent.length >= 8) return false;
-    const saved = await db("/rest/v1/booking_rate_limits", {
-      method: "POST", headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ ip_hash: ipHash }),
+  async function enforceRateLimit(event, purpose, maxRequests) {
+    // Netlify supplies the client connection IP. Only use a forwarded value in local dev.
+    const requestHeaders = event.headers || {};
+    const header = (name) => Object.entries(requestHeaders)
+      .find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+    const forwarded = header("x-nf-client-connection-ip") ||
+      (process.env.CONTEXT === "dev" ? header("x-forwarded-for")?.split(",")[0]?.trim() : null);
+    if (!forwarded) return false; // Fail closed; never place unrelated guests in one "unknown" bucket.
+    const ipHash = crypto.createHmac("sha256", serviceKey)
+      .update(purpose + ":" + String(forwarded)).digest("hex");
+    const limiter = await db("/rest/v1/rpc/try_consume_booking_rate_limit", {
+      method: "POST",
+      body: JSON.stringify({
+        p_ip_hash: ipHash,
+        p_max_requests: maxRequests,
+        p_window_seconds: 3600,
+      }),
     });
-    if (!saved.ok) throw new Error("database");
-    return true;
+    if (!limiter.ok) throw new Error("rate limit service");
+    return (await limiter.json()) === true;
   }
   function parseBody() {
     try { return JSON.parse(event.body || "{}"); } catch (_) { return null; }
@@ -86,25 +92,35 @@ exports.handler = async (event) => {
         return response(200, { ok: true, available: !blocks.length && !bookings.length, nights, estimated_total: Number(room.base_price) * nights, message: blocks.length || bookings.length ? "Dates are not currently available." : "Dates look available; the host must confirm your request." });
       }
 
-      const ref = safeText(q.reference, 40).toUpperCase();
-      const token = safeText(q.token, 200);
-      if (!/^UK-[A-Z0-9-]{10,36}$/.test(ref) || token.length < 32) {
+      return response(405, { ok: false, error: "Use the secure tracking form to look up a booking." });
+    }
+
+    const body = event.httpMethod === "GET" ? null : parseBody();
+    if (event.httpMethod !== "GET" && !body) {
+      return response(400, { ok: false, error: "Please submit valid booking details." });
+    }
+
+    if (event.httpMethod !== "GET") {
+      const tracking = event.httpMethod === "POST" && body.action === "track";
+      const purpose = tracking ? "guest-track" : event.httpMethod === "PATCH" ? "guest-cancel" : "guest-booking";
+      const maxRequests = tracking ? 30 : event.httpMethod === "PATCH" ? 12 : 8;
+      const allowed = await enforceRateLimit(event, purpose, maxRequests);
+      if (!allowed) return response(429, { ok: false, error: "Too many requests from this connection. Please wait and try again." });
+    }
+
+    if (event.httpMethod === "POST" && body.action === "track") {
+      const reference = safeText(body.reference, 40).toUpperCase();
+      const token = safeText(body.token, 200);
+      if (!/^UK-[A-Z0-9-]{10,36}$/.test(reference) || token.length < 32) {
         return response(400, { ok: false, error: "Enter a valid booking reference and access token." });
       }
-      const found = await rows("/rest/v1/booking_requests?select=booking_reference,property_id,room_unit_id,check_in,check_out,adults,children,special_requests,estimated_total,status,created_at&booking_reference=eq." + encodeURIComponent(ref) + "&guest_access_token_hash=eq." + tokenHash(token) + "&limit=1");
+      const found = await rows("/rest/v1/booking_requests?select=booking_reference,property_id,room_unit_id,check_in,check_out,adults,children,special_requests,estimated_total,status,created_at&booking_reference=eq." + encodeURIComponent(reference) + "&guest_access_token_hash=eq." + tokenHash(token) + "&limit=1");
       if (!found.length) return response(404, { ok: false, error: "We couldn't find a booking with those details." });
       const booking = found[0];
       const property = await rows("/rest/v1/properties?select=name,village,district,state&id=eq." + encodeURIComponent(booking.property_id) + "&limit=1");
       const room = await rows("/rest/v1/room_units?select=room_name&id=eq." + encodeURIComponent(booking.room_unit_id) + "&limit=1");
       return response(200, { ok: true, booking: { ...booking, property: property[0] || null, room: room[0] || null } });
     }
-
-    if (event.httpMethod === "POST") {
-      const allowed = await enforceCreateRateLimit(event);
-      if (!allowed) return response(429, { ok: false, error: "Too many booking requests from this connection. Please wait and try again." });
-    }
-    const body = parseBody();
-    if (!body) return response(400, { ok: false, error: "Please submit valid booking details." });
 
     if (event.httpMethod === "PATCH") {
       const reference = safeText(body.reference, 40).toUpperCase();

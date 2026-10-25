@@ -7,12 +7,13 @@ const headers = {
 function response(statusCode, payload) { return { statusCode, headers, body: JSON.stringify(payload) }; }
 function clean(value, max = 1000) { return String(value || "").trim().slice(0, max); }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   if (!["GET", "POST"].includes(event.httpMethod)) return response(405, { ok: false, error: "Method not allowed." });
   const baseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!baseUrl || !serviceKey) return response(503, { ok: false, error: "Host portal is temporarily unavailable." });
-  const authHeader = event.headers?.authorization || event.headers?.Authorization || "";
+  const authHeader = Object.entries(event.headers || {})
+    .find(([key]) => key.toLowerCase() === "authorization")?.[1] || "";
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!match) return response(401, { ok: false, error: "Please sign in to access the host portal." });
   const token = match[1];
