@@ -47,6 +47,21 @@ exports.handler = async (event) => {
     if (!r.ok) throw new Error("database");
     return r.json();
   }
+  async function enforceCreateRateLimit(event) {
+    const forwarded = event.headers?.["x-nf-client-connection-ip"] ||
+      event.headers?.["X-Nf-Client-Connection-Ip"] ||
+      event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() || "unknown";
+    const ipHash = crypto.createHmac("sha256", serviceKey).update(String(forwarded)).digest("hex");
+    const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const recent = await rows("/rest/v1/booking_rate_limits?select=id&ip_hash=eq." + ipHash + "&created_at=gte." + encodeURIComponent(since) + "&limit=8");
+    if (recent.length >= 8) return false;
+    const saved = await db("/rest/v1/booking_rate_limits", {
+      method: "POST", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ ip_hash: ipHash }),
+    });
+    if (!saved.ok) throw new Error("database");
+    return true;
+  }
   function parseBody() {
     try { return JSON.parse(event.body || "{}"); } catch (_) { return null; }
   }
@@ -84,6 +99,10 @@ exports.handler = async (event) => {
       return response(200, { ok: true, booking: { ...booking, property: property[0] || null, room: room[0] || null } });
     }
 
+    if (event.httpMethod === "POST") {
+      const allowed = await enforceCreateRateLimit(event);
+      if (!allowed) return response(429, { ok: false, error: "Too many booking requests from this connection. Please wait and try again." });
+    }
     const body = parseBody();
     if (!body) return response(400, { ok: false, error: "Please submit valid booking details." });
 
