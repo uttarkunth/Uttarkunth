@@ -1,176 +1,50 @@
 import React, { useState } from 'react';
-import { staysStore } from '../lib/staysStore';
-import { Reservation } from '../types/database.types';
-import {
-  Calendar,
-  MapPin,
-  Clock,
-  ShieldCheck,
-  Navigation,
-  ExternalLink,
-  AlertCircle,
-  CheckCircle,
-  XCircle,
-  ArrowRight,
-} from 'lucide-react';
+import { ArrowLeft, CalendarDays, CheckCircle2, KeyRound, LoaderCircle, MapPin, Search, ShieldCheck, XCircle } from 'lucide-react';
+import { staysApi } from '../lib/staysApi';
 
-interface GuestTripsViewProps {
-  onNavigateToExplore: () => void;
-}
+interface GuestTripsViewProps { onNavigateToExplore: () => void; }
+type TrackedBooking = Record<string, unknown>;
+const display = (value: unknown) => value == null || value === '' ? '—' : String(value);
+const money = (value: unknown) => new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(Number(value || 0));
 
 export const GuestTripsView: React.FC<GuestTripsViewProps> = ({ onNavigateToExplore }) => {
-  const [reservations, setReservations] = useState<Reservation[]>(
-    staysStore.getReservationsForGuest('guest-current-user')
-  );
-  const [cancellationNotice, setCancellationNotice] = useState<string | null>(null);
+  const [reference, setReference] = useState('');
+  const [token, setToken] = useState('');
+  const [booking, setBooking] = useState<TrackedBooking | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
 
-  const handleCancelBooking = (bookingId: string) => {
-    const res = staysStore.cancelReservation(bookingId);
-    if (res.success) {
-      setCancellationNotice(res.message);
-      setReservations(staysStore.getReservationsForGuest('guest-current-user'));
-    }
+  const lookup = async (event: React.FormEvent) => {
+    event.preventDefault(); setBusy(true); setError(''); setNotice(''); setBooking(null);
+    try { const result = await staysApi.trackBooking(reference, token); setBooking(result.booking); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not find that booking.'); }
+    finally { setBusy(false); }
   };
+  const cancel = async () => {
+    if (!booking || !window.confirm('Cancel this pending booking request?')) return;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      await staysApi.cancelPendingBooking(display(booking.booking_reference), token, 'Cancelled by guest');
+      setNotice('Your pending request has been cancelled.');
+      const result = await staysApi.trackBooking(reference, token); setBooking(result.booking);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not cancel this request.'); }
+    finally { setBusy(false); }
+  };
+  const property = booking?.property as Record<string, unknown> | undefined;
+  const room = booking?.room as Record<string, unknown> | undefined;
+  const status = display(booking?.status).toLowerCase();
 
-  return (
-    <div className="min-h-screen bg-[#FBF9F5] text-stone-900 pb-20">
-      {/* Header */}
-      <section className="bg-[#163E2E] text-white py-12 px-4 sm:px-6 lg:px-8 border-b border-[#214738]">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <span className="text-xs uppercase tracking-widest text-[#D8773E] font-semibold">
-              Guest Portal
-            </span>
-            <h1 className="text-2xl sm:text-4xl font-serif font-bold text-white">
-              My Himalayan Trips
-            </h1>
-            <p className="text-xs sm:text-sm text-[#D1E0D7] font-light">
-              Review your bookings, access property coordinates, and manage stay itineraries.
-            </p>
-          </div>
-
-          <button
-            onClick={onNavigateToExplore}
-            className="px-5 py-2.5 bg-[#B85D28] hover:bg-[#964218] text-white text-xs font-semibold uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 shrink-0"
-          >
-            <span>Explore More Stays</span>
-            <ArrowRight size={13} />
-          </button>
-        </div>
-      </section>
-
-      {/* Main Container */}
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-6">
-        {cancellationNotice && (
-          <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-900 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CheckCircle size={16} className="text-emerald-600 shrink-0" />
-              <span>{cancellationNotice}</span>
-            </div>
-            <button onClick={() => setCancellationNotice(null)} className="font-bold underline">Dismiss</button>
-          </div>
-        )}
-
-        {reservations.length === 0 ? (
-          <div className="text-center py-16 bg-white rounded-2xl border border-stone-200 p-8 space-y-4 shadow-xs">
-            <Calendar size={40} className="text-stone-400 mx-auto" />
-            <h3 className="font-serif font-bold text-xl text-stone-900">No Trips Booked Yet</h3>
-            <p className="text-xs text-stone-500 max-w-sm mx-auto">
-              Discover verified homestays in Parvati Valley, Naggar, or Tirthan and experience community hospitality.
-            </p>
-            <button
-              onClick={onNavigateToExplore}
-              className="px-6 py-2.5 bg-[#163E2E] text-white text-xs font-semibold uppercase tracking-wider rounded-lg shadow-sm"
-            >
-              Discover Stays
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {reservations.map((res) => {
-              const isCancelled = res.reservation_status === 'cancelled';
-              return (
-                <div
-                  key={res.id}
-                  className={`bg-white rounded-2xl border transition-all p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6 ${
-                    isCancelled ? 'border-stone-200 opacity-60 bg-stone-50' : 'border-stone-200 hover:border-stone-300'
-                  }`}
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-[#163E2E] bg-[#163E2E]/10 px-2 py-0.5 rounded">
-                        {res.booking_reference}
-                      </span>
-                      <span
-                        className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                          isCancelled
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-emerald-100 text-emerald-800'
-                        }`}
-                      >
-                        {res.reservation_status}
-                      </span>
-                      <span className="text-[10px] text-stone-400">
-                        Paid via Razorpay Sandbox
-                      </span>
-                    </div>
-
-                    <h3 className="font-serif font-bold text-xl text-stone-900">
-                      {res.property_name}
-                    </h3>
-                    <p className="text-xs text-stone-600 font-medium">
-                      {res.room_name} • {res.number_of_guests} Guest(s)
-                    </p>
-
-                    <div className="flex flex-wrap items-center gap-4 text-xs text-stone-500 pt-1">
-                      <span className="flex items-center gap-1 text-stone-700">
-                        <Calendar size={13} className="text-[#163E2E]" />
-                        <span>Check-in: {res.check_in}</span>
-                      </span>
-                      <span>→</span>
-                      <span className="flex items-center gap-1 text-stone-700">
-                        <Calendar size={13} className="text-[#163E2E]" />
-                        <span>Check-out: {res.check_out}</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col md:items-end justify-between gap-4 pt-4 md:pt-0 border-t md:border-t-0 border-stone-100">
-                    <div className="md:text-right">
-                      <span className="text-xl font-serif font-bold text-stone-900">
-                        ₹{res.total_amount.toLocaleString('en-IN')}
-                      </span>
-                      <span className="text-[11px] text-stone-500 block">Total Paid</span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <a
-                        href="https://www.google.com/maps/dir/?api=1&destination=31.9894,77.2415"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-medium rounded-lg flex items-center gap-1 transition-colors"
-                      >
-                        <Navigation size={13} />
-                        <span>Google Maps</span>
-                        <ExternalLink size={11} className="opacity-60" />
-                      </a>
-
-                      {!isCancelled && (
-                        <button
-                          onClick={() => handleCancelBooking(res.id)}
-                          className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-medium rounded-lg transition-colors"
-                        >
-                          Cancel Stay
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+  return <div className="min-h-screen bg-[#FBF9F5] text-stone-900 pb-20">
+    <section className="bg-[#163E2E] text-white py-12 px-4 sm:px-6 lg:px-8 border-b border-[#214738]"><div className="max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-end justify-between gap-5"><div><span className="text-xs uppercase tracking-[0.18em] text-[#E9A16F] font-semibold">Guest portal</span><h1 className="text-3xl sm:text-4xl font-serif font-semibold mt-2">Your Himalayan trips</h1><p className="text-sm text-[#D1E0D7] mt-2 max-w-xl">Look up a request securely using the booking reference and private tracking token shown when you submitted it.</p></div><button onClick={onNavigateToExplore} className="px-5 py-3 bg-white text-[#163E2E] text-xs font-bold uppercase tracking-wider rounded-lg self-start sm:self-auto"><ArrowLeft size={14} className="inline mr-2"/>Explore stays</button></div></section>
+    <main className="max-w-3xl mx-auto px-4 sm:px-6 py-9 space-y-6">
+      <div className="bg-white border border-stone-200 rounded-2xl p-5 sm:p-7 shadow-sm"><div className="flex gap-3 items-start mb-5"><div className="p-3 bg-[#EEF2EA] rounded-xl text-[#163E2E]"><KeyRound size={22}/></div><div><h2 className="font-serif text-xl font-semibold">Find a booking request</h2><p className="text-sm text-stone-500 mt-1">Your token is private. Uttarkunth stores only a secure hash of it.</p></div></div>
+        <form onSubmit={lookup} className="space-y-4"><label className="block text-xs font-semibold text-stone-700">Booking reference<input required value={reference} onChange={e=>setReference(e.target.value)} className="block w-full mt-1 p-3 border border-stone-200 rounded-lg bg-stone-50 font-mono text-sm" placeholder="UK-…"/></label><label className="block text-xs font-semibold text-stone-700">Private tracking token<input required value={token} onChange={e=>setToken(e.target.value)} className="block w-full mt-1 p-3 border border-stone-200 rounded-lg bg-stone-50 font-mono text-xs" placeholder="Paste the token from your confirmation"/></label><button disabled={busy} className="w-full py-3 bg-[#163E2E] hover:bg-[#0F2E22] disabled:opacity-60 text-white rounded-lg text-xs font-bold uppercase tracking-wider">{busy?<><LoaderCircle size={14} className="inline mr-2 animate-spin"/>Checking…</>:<><Search size={14} className="inline mr-2"/>Find my request</>}</button></form>
+        {error && <p role="alert" className="mt-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">{error}</p>}{notice && <p role="status" className="mt-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-sm text-emerald-800">{notice}</p>}
       </div>
-    </div>
-  );
+      {booking && <div className="bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-sm"><div className="p-5 sm:p-6 bg-[#F3F5F0] border-b border-stone-200 flex items-start justify-between gap-4"><div><p className="text-[10px] uppercase tracking-wider text-stone-500">Booking reference</p><p className="font-mono font-bold text-[#163E2E] mt-1">{display(booking.booking_reference)}</p><h2 className="font-serif text-2xl font-semibold mt-3">{display(property?.name)}</h2><p className="text-sm text-stone-500 mt-1">{[property?.village,property?.district,property?.state].filter(Boolean).join(', ')}</p></div><span className={`px-3 py-1.5 rounded-full text-xs font-bold capitalize ${status==='confirmed'?'bg-emerald-100 text-emerald-800':status==='cancelled'?'bg-stone-200 text-stone-700':status==='rejected'?'bg-red-100 text-red-800':'bg-amber-100 text-amber-800'}`}>{display(booking.status)}</span></div>
+        <div className="p-5 sm:p-6 space-y-5"><div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><div className="p-4 rounded-xl bg-stone-50"><p className="text-xs text-stone-500 flex items-center gap-2"><CalendarDays size={14}/> Check-in</p><p className="font-semibold mt-2">{display(booking.check_in)}</p></div><div className="p-4 rounded-xl bg-stone-50"><p className="text-xs text-stone-500 flex items-center gap-2"><CalendarDays size={14}/> Check-out</p><p className="font-semibold mt-2">{display(booking.check_out)}</p></div></div><div className="flex flex-col sm:flex-row justify-between gap-4"><div><p className="text-xs text-stone-500">Room</p><p className="font-semibold mt-1">{display(room?.room_name)}</p><p className="text-xs text-stone-500 mt-1">{display(booking.adults)} adult(s) · {display(booking.children)} child(ren)</p></div><div className="sm:text-right"><p className="text-xs text-stone-500">Estimated total · pay at property after confirmation</p><p className="font-serif text-2xl font-semibold text-[#163E2E] mt-1">{money(booking.estimated_total)}</p></div></div><div className="p-4 rounded-xl bg-[#EEF2EA] text-sm text-stone-700 flex gap-3"><ShieldCheck size={20} className="text-[#163E2E] shrink-0"/><p>{status==='confirmed'?'Your host has confirmed this stay. Contact the property directly for any changes.':status==='cancelled'?'This request has been cancelled.':status==='rejected'?'The host could not accept this request. You can explore other available stays.':'Your request is awaiting host confirmation. This is not a confirmed reservation yet.'}</p></div>{status==='pending' && <button disabled={busy} onClick={cancel} className="px-4 py-2.5 border border-red-200 text-red-700 hover:bg-red-50 rounded-lg text-xs font-bold uppercase tracking-wider"><XCircle size={14} className="inline mr-2"/>Cancel pending request</button>}</div></div>}
+      <p className="text-xs text-stone-500 text-center leading-relaxed">Lost your token? For your privacy, it cannot be recovered from the database. Contact Uttarkunth support for assistance.</p>
+    </main>
+  </div>;
 };
